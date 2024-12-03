@@ -1,2 +1,2 @@
 # reaction-wheel-project
-Reaction Wheel Project using Atmega328p
+A self balancing, reaction wheel project using Atmega328p
