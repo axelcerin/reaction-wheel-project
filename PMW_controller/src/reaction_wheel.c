@@ -43,10 +43,10 @@ int main(void)
     while (1)
     {
         set_motor_speed(0);
-        // set_motor_speed(19000);
-        // _delay_ms(5000);
-        // set_motor_speed(-19000);
-        // _delay_ms(5000);
+        set_motor_speed(19000);
+        _delay_ms(5000);
+        set_motor_speed(-19000);
+        _delay_ms(5000);
     }
 }
 

@@ -8,15 +8,15 @@
         {
             "name": "PlatformIO",
             "includePath": [
-                "C:/Users/ackec/Documents/PlatformIO/Projects/MPU_to_serial/include",
-                "C:/Users/ackec/Documents/PlatformIO/Projects/MPU_to_serial/src",
+                "C:/Users/Hugok/Documents/GitHub/reaction-wheel-project/PMW_controller/include",
+                "C:/Users/Hugok/Documents/GitHub/reaction-wheel-project/PMW_controller/src",
                 ""
             ],
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
-                    "C:/Users/ackec/Documents/PlatformIO/Projects/MPU_to_serial/include",
-                    "C:/Users/ackec/Documents/PlatformIO/Projects/MPU_to_serial/src",
+                    "C:/Users/Hugok/Documents/GitHub/reaction-wheel-project/PMW_controller/include",
+                    "C:/Users/Hugok/Documents/GitHub/reaction-wheel-project/PMW_controller/src",
                     ""
                 ]
             },
@@ -29,7 +29,7 @@
             ],
             "cStandard": "gnu11",
             "cppStandard": "gnu++11",
-            "compilerPath": "C:/Users/ackec/.platformio/packages/toolchain-atmelavr/bin/avr-gcc.exe",
+            "compilerPath": "C:/Users/Hugok/.platformio/packages/toolchain-atmelavr/bin/avr-gcc.exe",
             "compilerArgs": [
                 "-mmcu=atmega328p",
                 ""

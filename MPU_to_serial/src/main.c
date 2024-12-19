@@ -1,162 +1,240 @@
 /*
  * ATmega16 Interface with MPU-6050
- * http://www.electronicwings.com
- *
- */ 
+ * Motor Control using SN754410 Motor Driver
+ * PWM on PB2 and PB1 for direction and speed control
+ * PID control based on Gyro data
+ */
 
-
-#define BAUD 4800                 						/* Baud rate for serial communication */
-#define F_CPU 1000000UL
-#include <avr/io.h>										/* Include AVR std. library file */
-#include <util/delay.h>									/* Include delay header file */
-#include <inttypes.h>									/* Include integer type header file */
-#include <stdlib.h>										/* Include standard library file */
-#include <stdio.h>										/* Include standard library file */
-#include "MPU6050_res_define.h"							/* Include MPU6050 register define file */
-#include "I2C_Master_H_file.h"							/* Include I2C Master header file */
-#include "USART_RS232_H_file.h"							/* Include USART header file */
+#define BAUD 4800                     /* Baud rate for serial communication */
+#define F_CPU 1000000UL               /* Clock speed (1 MHz) */
+#include <avr/io.h>
+#include <util/delay.h>
+#include <inttypes.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "MPU6050_res_define.h"        /* Include MPU6050 register define file */
+#include "I2C_Master_H_file.h"         /* Include I2C Master header file */
+#include "USART_RS232_H_file.h"        /* Include USART header file */
 #include <avr/interrupt.h>
 
-volatile float  Acc_x;
-// volatile float Gyro_x; 
+// PID constants (tune these for your system)
+#define Kp 1.0    // Proportional gain
+#define Ki 0.1    // Integral gain
+#define Kd 0.05   // Derivative gain
+
+// Target gyro value (desired angular velocity)
+#define TARGET_GYRO 300  // Example target value, set to 0 for no tilt
+
+volatile float Gyro_x;
 volatile uint8_t data_ready = 0;  // Flag for data reading
 volatile uint8_t timer = 0;  // Flag for data writing
 
-ISR(TIMER0_COMPA_vect)
-{
-	cli();
-    // Read_RawValue();  // Read data from MPU6050 when interrupt occurs
-	data_ready = 1;
-	sei();
+float prev_error = 0.0;
+float integral = 0.0;
+float pid_output = 0.0;
+
+// Function to initialize PWM (for motor control)
+void setupPWM() {
+    DDRB |= (1 << PB2) | (1 << PB1); // Set PB2 and PB1 as output (PWM for motor control)
+
+    // Timer1 setup for PWM on PB2 (OC1A) and PB1 (OC1B)
+    TCCR1A = (1 << COM1A1) | (1 << COM1B1) | (1 << WGM10);  // Fast PWM mode with non-inverted outputs
+    TCCR1B = (1 << WGM12) | (1 << CS11); // Prescaler = 8
 }
 
-ISR(TIMER1_COMPA_vect)
-{
-    // Read_RawValue();  // Read data from MPU6050 when interrupt occurs
-	timer = 1;
+// Function to set motor speed and direction
+void setMotorSpeedAndDirection(uint8_t speed, int8_t direction) {
+
+    // Stop motor by clearing both PWM signals first
+    PORTB &= ~((1 << PB2) | (1 << PB1));
+
+    // Check direction and set PWM signals accordingly
+    if (direction > 0) {
+        // Forward direction
+        PORTB |= (1 << PB2);   // PB2 HIGH: Input 1 for forward
+        PORTB &= ~(1 << PB1);  // PB1 LOW: Input 2 for forward
+        OCR1A = speed;         // Set speed for PWM signal on PB2
+        OCR1B = 0;             // No PWM signal on PB1 for forward
+    } else if (direction < 0) {
+        // Reverse direction
+        PORTB &= ~(1 << PB2);  // PB2 LOW: Input 1 for reverse
+        PORTB |= (1 << PB1);   // PB1 HIGH: Input 2 for reverse
+        OCR1A = 0;             // No PWM signal on PB2 for reverse
+        OCR1B = speed;         // Set speed for PWM signal on PB1
+    } else {
+        // Stop the motor
+        OCR1A = 0;
+        OCR1B = 0;
+    }
 }
 
-
-void timer_init(void)
-{
-    // Set Timer0 to CTC mode (Clear Timer on Compare Match)
-    TCCR0A = 0;            // Normal mode (WGM01 and WGM00 both 0)
-    TCCR0B = (1 << WGM02); // CTC mode (WGM02 = 1)
-
-    // Set the compare match value (OCR0A) for the interrupt frequency
-    OCR0A = 140;           // Example: Compare match value, 125 gives a 1ms interrupt with 1 MHz clock and prescaler 64
-
-    // Set prescaler to 64 (CS01 = 1, CS00 = 1)
-    TCCR0B |= (1 << CS02) |(0 << CS01) | (0 << CS00);
-
-    // Enable the Timer0 compare match interrupt (Timer0 compare match A)
-    TIMSK0 |= (1 << OCIE0A);
-
-
-		// Set Timer1 to CTC mode (Clear Timer on Compare Match)
-		TCCR1A = 0;            // Normal mode (WGM11 and WGM10 both 0)
-		TCCR1B = (1 << WGM12); // CTC mode (WGM12 = 1)
-
-		// Set the compare match value (OCR1A) for the interrupt frequency
-		OCR1A = 150;           // Example: Compare match value, 125 gives a 1ms interrupt with 1 MHz clock and prescaler 64
-
-		// Set prescaler to 64 (CS01 = 1, CS00 = 1)
-		TCCR1B |= (1 << CS12) |(0 << CS11) | (0 << CS10);
-
-		// Enable the Timer1 compare match interrupt (Timer1 compare match A)
-		TIMSK1 |= (1 << OCIE1A);
-
-    // Enable global interrupts
-	sei();
+// Timer0 interrupt handler
+ISR(TIMER0_COMPA_vect) {
+    cli();
+    data_ready = 1;  // Flag for data reading from MPU6050
+    sei();
 }
 
-void MPU6050_Init()										/* Gyro initialization function */
-{
-	_delay_ms(150);										/* Power up time >100ms */
-	I2C_Start_Wait(0xD0);								/* Start with device write address */
-	I2C_Write(SMPLRT_DIV);								/* Write to sample rate register */
-	I2C_Write(0x07);									/* 1KHz sample rate */
-	I2C_Stop();
-
-	I2C_Start_Wait(0xD0);
-	I2C_Write(PWR_MGMT_1);								/* Write to power management register */
-	I2C_Write(0x01);									/* X axis gyroscope reference frequency */
-	I2C_Stop();
-
-	I2C_Start_Wait(0xD0);
-	I2C_Write(CONFIG);									/* Write to Configuration register */
-	I2C_Write(0x00);									/* Fs = 8KHz */
-	I2C_Stop();
-
-	I2C_Start_Wait(0xD0);
-	I2C_Write(GYRO_CONFIG);								/* Write to Gyro configuration register */
-	I2C_Write(0x18);									/* Full scale range +/- 2000 degree/C */
-	I2C_Stop();
-
-	I2C_Start_Wait(0xD0);
-	I2C_Write(INT_ENABLE);								/* Write to interrupt enable register */
-	I2C_Write(0x01);
-	I2C_Stop();
+// Timer1 interrupt handler
+ISR(TIMER1_COMPA_vect) {
+    timer = 1;  // Timer flag for PID control
 }
 
-void MPU_Start_Loc()
-{
-	I2C_Start_Wait(0xD0);								/* I2C start with device write address */
-	I2C_Write(ACCEL_XOUT_H);							/* Write start location address from where to read */ 
-	I2C_Repeated_Start(0xD1);							/* I2C start with device read address */
+// Timer initialization function
+void timer_init(void) {
+    // Set Timer0 for data reading at regular intervals
+    OCR0A = 140;  // Example: 1ms interrupt with 1 MHz clock and prescaler 64
+    TCCR0B |= (0 << CS02) | (1 << CS01) | (1 << CS00);  // Prescaler 64
+    TIMSK0 |= (1 << OCIE0A);  // Enable Timer0 compare match interrupt
+
+    // Set Timer1 for PID control at regular intervals
+    OCR1A = 255;  // Example: 1ms interrupt
+    TCCR1B |= (1 << CS12) | (0 << CS11) | (1 << CS10);  // Prescaler 64
+    TIMSK1 |= (1 << OCIE1A);  // Enable Timer1 compare match interrupt
+
+    sei();  // Enable global interrupts
 }
 
-void Read_RawValue()
-{
-	MPU_Start_Loc();									/* Read Gyro values */
-	
-	// Read Accelerometer
-	Acc_x = (((int)I2C_Read_Ack()<<8) | (int)I2C_Read_Ack());
+// MPU6050 initialization function
+void MPU6050_Init() {
+    _delay_ms(150);  // Power-up delay
+    I2C_Start_Wait(0xD0);  // Write to device address
+    I2C_Write(SMPLRT_DIV);  // Sample rate register
+    I2C_Write(0x07);        // 1 KHz sample rate
+    I2C_Stop();
 
-	// Read Gyro
-	// Gyro_x = (((int)I2C_Read_Ack()<<8) | (int)I2C_Read_Ack());
+    I2C_Start_Wait(0xD0);
+    I2C_Write(PWR_MGMT_1);  // Power management register
+    I2C_Write(0x01);        // Gyroscope reference frequency
+    I2C_Stop();
 
-	I2C_Stop();
+    I2C_Start_Wait(0xD0);
+    I2C_Write(GYRO_CONFIG);  // Gyro config register
+    I2C_Write(0x18);         // Full scale range +/- 2000 degree/C
+    I2C_Stop();
+
+    I2C_Start_Wait(0xD0);
+    I2C_Write(INT_ENABLE);  // Interrupt enable register
+    I2C_Write(0x01);        // Enable interrupt
+    I2C_Stop();
 }
 
-int main()
-{
-	
-	char buffer[20], float_[10];
-	float Xa=0;
-	// float Xg=0;											
-	I2C_Init();											/* Initialize I2C */
-	MPU6050_Init();										/* Initialize MPU6050 */
-	USART_Init(BAUD);									/* Initialize USART with 9600 baud rate */
-	char init_message[] = "init complete\n";  // Null-terminated string
-	USART_SendString(init_message);         // Send the whole string at once
-	
-	timer_init();
+// MPU6050 read function
+void Read_RawValue() {
+    I2C_Start_Wait(0xD0);  // I2C start with device write address
+    I2C_Write(ACCEL_XOUT_H);  // Start location to read
+    I2C_Repeated_Start(0xD1);  // I2C start with device read address
+    Gyro_x = (((int)I2C_Read_Ack() << 8) | (int)I2C_Read_Ack());  // Read Gyro data
+    I2C_Stop();
+}
 
-	while(1)
-	{
-				
-		if (data_ready)
-		{
-			data_ready = 0;
-			Read_RawValue();  // Handle the I2C communication in the main loop
-		}
+// PID Controller Calculation
+float calculatePID(float target, float current_value) {
+    // Calculate error
+    float error = target - current_value;
 
-		if (timer)
-		{
-			timer = 0;
+    // Proportional term
+    float proportional = Kp * error;
 
-			// Display Accelerometer Data
-			Xa = Acc_x/16384.0;
-			dtostrf( Xa, 3, 2, float_ );
-			sprintf(buffer," X = %s\n",float_);
-			USART_SendString(buffer);
+    // Integral term
+    integral += error;
+    float integral_term = Ki * integral;
 
-			// Display Gyro Data
-			// Xg = Gyro_x/16.4;
-			// dtostrf( Xg, 3, 2, float_ );
-			// sprintf(buffer," X = %s\n",float_);
-			// USART_SendString(buffer);
-		}
-	}
+    // Derivative term
+    float derivative = Kd * (error - prev_error);
+
+    // Calculate PID output
+    pid_output = proportional + integral_term + derivative;
+
+    // Store current error for next calculation
+    prev_error = error;
+
+    return pid_output;
+}
+
+// Main function
+int main() {
+    char buffer[20], float_[10];
+    I2C_Init();             // Initialize I2C
+    MPU6050_Init();         // Initialize MPU6050
+    USART_Init(BAUD);       // Initialize USART
+    char init_message[] = "init complete\n";
+    USART_SendString(init_message);  // Send init message
+    timer_init();           // Initialize timers
+    setupPWM();             // Initialize PWM
+
+    while (1) {
+        if (data_ready) {
+            data_ready = 0;
+            Read_RawValue();  // Handle data reading from MPU6050
+        }
+
+        if (timer) {
+            timer = 0;
+
+            // Use PID controller to calculate motor speed based on Gyro_x
+            pid_output = calculatePID(TARGET_GYRO, Gyro_x);
+            pid_output = pid_output*0.0085; // Rescaled so 30000 = 255
+
+            int8_t motor_speed = 0;
+
+            if (pid_output > 255)
+            {
+                motor_speed = 255;
+            }
+
+            if (pid_output > 0)
+            {
+                motor_speed = 0;
+            }
+
+            else
+            {
+            motor_speed = pid_output;
+            }
+            // // Scale the pid_output to a value between 0 and 250
+            // uint8_t motor_speed = (uint8_t)(pid_output > 250 ? 250 : (pid_output < 0 ? 0 : pid_output));
+
+            // // Optionally, you can map the PID output to the range 0-250 using linear scaling
+            // motor_speed = (uint8_t)(pid_output > 250 ? 250 : (pid_output < 0 ? 0 : pid_output));
+
+
+            // Set motor direction based on PID output
+            int8_t motor_direction = (pid_output > 0) ? 1 : (pid_output < 0) ? -1 : 0;
+
+            // Set motor speed and direction
+			// setMotorSpeedAndDirection(255,1);
+			// _delay_ms(1000);
+			// setMotorSpeedAndDirection(255,-1);
+			// _delay_ms(1000);
+            setMotorSpeedAndDirection(motor_speed, motor_direction);
+
+            // Display Gyro Data via USART
+            float Xg = Gyro_x;  // Gyro data
+            dtostrf(motor_direction, 3, 2, float_);
+            sprintf(buffer, "motor direction: %s", float_);
+            USART_SendString(buffer);
+
+            char space_between_data[] = "        ";  // Null-terminated string
+            USART_SendString(space_between_data);    // Send space between data
+
+            dtostrf(motor_speed, 3, 2, float_);
+            sprintf(buffer, "motor speed: %s", float_);
+            USART_SendString(buffer);
+
+            USART_SendString(space_between_data);    // Send space between data
+
+            dtostrf(pid_output, 3, 2, float_);
+            sprintf(buffer, "pid output: %s", float_);
+            USART_SendString(buffer);
+
+            USART_SendString(space_between_data);    // Send space between data
+
+            dtostrf(Xg, 3, 2, float_);
+            sprintf(buffer, " X = %s\n", float_);
+            USART_SendString(buffer);
+        }
+
+        _delay_ms(100);
+    }
 }
