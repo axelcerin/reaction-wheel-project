@@ -1,16 +1,9 @@
-/*
-* GccApplication19.c
-*
-* Created: 2022-11-07 21:16:47
-* Author : uwezi
-*/
-
 #include <avr/io.h> // external library which describes our chip
 #include <util/delay.h> // external library for time delay functions
 
 void motor_init(void)
 {       
-    DDRB |= (1 << PB1) | (1 << PB2);  // Set PB1 and PB2 as outputs
+DDRB |= (1 << PB1) | (1 << PB2);  // Set PB1 (OC1A) and PB2 (OC1B) as outputs
     TCCR1A = (1 << COM1A1) | (0 << COM1A0)  // Non-inverting mode for OC1A
             | (1 << COM1B1) | (0 << COM1B0)  // Non-inverting mode for OC1B
             | (1 << WGM11) | (0 << WGM10);   // Fast PWM (mode 14)
@@ -43,10 +36,11 @@ int main(void)
     while (1)
     {
         set_motor_speed(0);
-        // set_motor_speed(19000);
-        // _delay_ms(5000);
-        // set_motor_speed(-19000);
-        // _delay_ms(5000);
+        _delay_ms(1000);
+        set_motor_speed(12000);
+        _delay_ms(1000);
+        set_motor_speed(-12000);
+        _delay_ms(1000);
     }
 }
 

@@ -8,15 +8,15 @@
         {
             "name": "PlatformIO",
             "includePath": [
-                "C:/Users/ackec/Documents/PlatformIO/Projects/MPU_to_serial/include",
-                "C:/Users/ackec/Documents/PlatformIO/Projects/MPU_to_serial/src",
+                "C:/Users/ackec/Documents/PlatformIO/Projects/reaction-wheel-project/PMW_controller/include",
+                "C:/Users/ackec/Documents/PlatformIO/Projects/reaction-wheel-project/PMW_controller/src",
                 ""
             ],
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
-                    "C:/Users/ackec/Documents/PlatformIO/Projects/MPU_to_serial/include",
-                    "C:/Users/ackec/Documents/PlatformIO/Projects/MPU_to_serial/src",
+                    "C:/Users/ackec/Documents/PlatformIO/Projects/reaction-wheel-project/PMW_controller/include",
+                    "C:/Users/ackec/Documents/PlatformIO/Projects/reaction-wheel-project/PMW_controller/src",
                     ""
                 ]
             },
