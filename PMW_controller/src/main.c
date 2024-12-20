@@ -37,9 +37,9 @@ int main(void)
     {
         set_motor_speed(0);
         _delay_ms(1000);
-        set_motor_speed(12000);
+        set_motor_speed(8000);
         _delay_ms(1000);
-        set_motor_speed(-12000);
+        set_motor_speed(-8000);
         _delay_ms(1000);
     }
 }
