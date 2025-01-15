@@ -21,8 +21,13 @@
 #include <avr/io.h> // external library which describes our chip
 #include <util/delay.h> // external library for time delay functions
 
+#define BUFFER_SIZE 5
+float data[BUFFER_SIZE];
+int head = 0; // Index for the next write
+float sum = 0.0;
+
 // Interupt variables
-volatile double  Acc_x = 0;
+// volatile double  Acc_x = 0;
 volatile double Gyro_x = 0; 
 // volatile uint8_t data_ready = 0;  // Flag for data reading
 // volatile uint8_t timer = 0;  // Flag for data writing
@@ -37,8 +42,8 @@ void timer_init(void)
     // Set the compare match value (OCR0A) for the interrupt frequency
     OCR0A = 125;           // Example: Compare match value, 125 gives a 1ms interrupt with 1 MHz clock and prescaler 64
 
-    // Set prescaler to 64 (CS01 = 1, CS00 = 1)
-    TCCR0B |= (1 << CS02) |(0 << CS01) | (0 << CS00);
+    // Set prescaler
+    TCCR0B |= (1 << CS02) |(0 << CS01) | (1 << CS00);
 
     // Enable the Timer0 compare match interrupt (Timer0 compare match A)
     TIMSK0 |= (1 << OCIE0A);
@@ -98,27 +103,26 @@ void Read_RawValue()
 
 // PID variables
 double pid_output, integral, previous = 0;
-double dt = 0.03;
-double kp = 1;
-double ki = 1;
-double kd = 1;
+double dt = 0.13;
+double kp = 300.0;
+double ki = 0.00;
+double kd = 100.0;
 double proportional, derivative;
-
 
 double pid(double error)
 {
     /* double */ proportional = error;
     integral += error*dt;
     /* double */ derivative = (error - previous) / dt;
+    // derivative = Acc_x;
     previous = error;
     pid_output =  (kp * proportional) + (ki * integral) + (kd * derivative);
 
     // Clamp the PID output to prevent extreme values
-    if (pid_output > 19999) pid_output = 19999;
-    if (pid_output < -19999) pid_output = -19999;
+    if (pid_output > 19999) {pid_output = 19999;}
+    else if (pid_output < -19999) {pid_output = -19999;}
 
 }
-
 
 void motor_init(void)
 {       
@@ -128,14 +132,13 @@ DDRB |= (1 << PB1) | (1 << PB2);  // Set PB1 (OC1A) and PB2 (OC1B) as outputs
             | (1 << WGM11) | (0 << WGM10);   // Fast PWM (mode 14)
     TCCR1B = (1 << WGM13) | (1 << WGM12)     // Fast PWM with ICR1 as top
             | (0 << CS12) | (1 << CS11) | (0 << CS10);  // Prescaler of 8
-    TIMSK1 = 0;  // No interrupts
 
     OCR1A = 0;   // Duty cycle initially 0
     OCR1B = 0;
     ICR1 = 19999;  // 1 kHz PWM frequency
 }
 
-void set_motor_speed(int16_t speed) { // Takes values between -19999 and 19999
+void set_motor_speed(int16_t speed) { // Takes values between -19999 and 19999 (dependent on ICR1)
     if (speed > 0) {
         OCR1A = speed;  // Forward PWM
         OCR1B = 0;
@@ -152,18 +155,31 @@ ISR(TIMER0_COMPA_vect)
 {
 	cli();
     Read_RawValue();  // Read data from MPU6050 when interrupt occurs
-    pid(Gyro_x);
-	// data_ready = 1;
+
+    Gyro_x = Gyro_x/16.4;
+    data[head] = Gyro_x;
+    // Acc_x = Acc_x/16384.0;
+    head = (head + 1) % BUFFER_SIZE; // Move head to the next position
+    for (int i = 0; i < BUFFER_SIZE; i++) {
+        sum += data[i];
+    }
+    sum = sum/BUFFER_SIZE;
+
+    pid(sum);
+    set_motor_speed(pid_output);
 	sei();
 }
-
-
 
 int main()
 {
 	char buffer[20], double_[10];
-	double Xa=0;
+	// double Xa=0;
 	double Xg=0;	
+
+    // Initialize the buffer
+    for (int i = 0; i < BUFFER_SIZE; i++) {
+        data[i] = 0.0; // Optional initialization
+    }
 
     double compare_register = 125;
     double prescaler = 256;
@@ -206,45 +222,47 @@ int main()
 	while(1)
 	{
 		
-        set_motor_speed(pid_output);
+        // // set_motor_speed(pid_output);
 
-        dtostrf(pid_output, 3, 2, double_ );
-        sprintf(buffer," PID output = %s",double_);
-        USART_SendString(buffer);
+        // dtostrf(pid_output, 3, 2, double_ );
+        // sprintf(buffer," PID output = %s",double_);
+        // USART_SendString(buffer);
 
-        // Display Accelerometer Data
+        // // Display Accelerometer Data
         // // Xa = Acc_x/16384.0;
-        // dtostrf( Xa, 3, 2, double_ );
+        // // Xa = Acc_x;
+        // // dtostrf( Xa, 3, 2, double_ );
+        // // sprintf(buffer," X = %s\n",double_);
+        // // USART_SendString(buffer);
+
+        // // // Display Gyro Data
+        // // Xg = Gyro_x/16.4;
+        // Xg = sum;
+        // dtostrf( Xg, 3, 2, double_ );
         // sprintf(buffer," X = %s\n",double_);
         // USART_SendString(buffer);
 
-        // // Display Gyro Data
-        Xg = Gyro_x/16.4;
-        dtostrf( Xg, 3, 2, double_ );
-        sprintf(buffer," X = %s\n",double_);
-        USART_SendString(buffer);
+        // USART_SendString(new_row);       // Send the whole string at once
 
-        USART_SendString(new_row);       // Send the whole string at once
+        // // dtostrf(proportional, 3, 2, double_ );
+        // // sprintf(buffer," P = %s",double_);
+        // // USART_SendString(buffer);
 
-        dtostrf(proportional, 3, 2, double_ );
-        sprintf(buffer," P = %s",double_);
-        USART_SendString(buffer);
+        // // USART_SendString(space); 
 
-        USART_SendString(space); 
+        // // dtostrf(integral, 3, 2, double_ );
+        // // sprintf(buffer," I = %s",double_);
+        // // USART_SendString(buffer);
 
-        dtostrf(integral, 3, 2, double_ );
-        sprintf(buffer," I = %s",double_);
-        USART_SendString(buffer);
+        // // USART_SendString(space); 
 
-        USART_SendString(space); 
-
-        dtostrf(derivative, 3, 2, double_ );
-        sprintf(buffer," D = %s",double_);
-        USART_SendString(buffer);
+        // // dtostrf(derivative, 3, 2, double_ );
+        // // sprintf(buffer," D = %s",double_);
+        // // USART_SendString(buffer);
 
 
-        USART_SendString(new_row);
+        // // USART_SendString(new_row);
 
-        _delay_ms(100);
+        // _delay_ms(100);
 	}
 }
